@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorization Complete</title>
+  <style>
+    body { max-width: 680px; margin: 4rem auto; padding: 0 1.25rem; font: 18px/1.55 system-ui, sans-serif; color: #172033; }
+    .card { background: #eef6ff; border-left: 4px solid #2463a6; padding: 1.25rem; }
+  </style>
+</head>
+<body>
+  <h1>Authorization received</h1>
+  <div class="card">
+    <p id="message">You can return to the Personal Health Data Viewer setup.</p>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const message = document.getElementById('message');
+    if (params.has('error')) {
+      message.textContent = 'Authorization was not completed. Return to the setup and try again.';
+    }
+  </script>
+</body>
+</html>
