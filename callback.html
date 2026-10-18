@@ -3,23 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Authorization Complete</title>
-  <style>
-    body { max-width: 680px; margin: 4rem auto; padding: 0 1.25rem; font: 18px/1.55 system-ui, sans-serif; color: #172033; }
-    .card { background: #eef6ff; border-left: 4px solid #2463a6; padding: 1.25rem; }
-  </style>
+  <title>Completing authorization</title>
+  <style>body{max-width:680px;margin:4rem auto;padding:0 1.25rem;font:18px/1.55 system-ui,sans-serif;color:#172033}.card{background:#eef6ff;border-left:4px solid #2463a6;padding:1.25rem}pre{white-space:pre-wrap;word-break:break-word}</style>
 </head>
 <body>
-  <h1>Authorization received</h1>
-  <div class="card">
-    <p id="message">You can return to the Personal Health Data Viewer setup.</p>
-  </div>
+  <h1>Completing Healow authorization</h1>
+  <div class="card"><p id="message">Exchanging your temporary authorization code…</p></div>
   <script>
+    const clientId = 'ur4XSJpgwi1CcZ0FqUp-BAMSmuM7iSpctwQtfPt3fzU';
+    const redirectUri = 'https://chattanoogadan.github.io/healow-health-data/callback.html';
+    const tokenUrl = 'https://oauthserver.eclinicalworks.com/oauth/oauth2/token';
     const params = new URLSearchParams(location.search);
     const message = document.getElementById('message');
-    if (params.has('error')) {
-      message.textContent = 'Authorization was not completed. Return to the setup and try again.';
-    }
+    (async () => {
+      if (params.has('error')) throw new Error(params.get('error_description') || params.get('error'));
+      const code = params.get('code'), returnedState = params.get('state'), expectedState = sessionStorage.getItem('healow_state'), verifier = sessionStorage.getItem('healow_pkce_verifier');
+      if (!code || !verifier || !returnedState || returnedState !== expectedState) throw new Error('Authorization state could not be verified. Return to the app and try again.');
+      const body = new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:redirectUri,client_id:clientId,code_verifier:verifier});
+      const response = await fetch(tokenUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Accept:'application/json'},body});
+      const payload = await response.json().catch(async () => ({error:await response.text()}));
+      if (!response.ok || !payload.access_token) throw new Error(payload.error_description || payload.error || `Token request failed (${response.status}).`);
+      sessionStorage.setItem('healow_access_token',payload.access_token);
+      if (payload.patient) sessionStorage.setItem('healow_patient',payload.patient);
+      sessionStorage.removeItem('healow_pkce_verifier'); sessionStorage.removeItem('healow_state');
+      history.replaceState({},document.title,location.pathname);
+      message.textContent='Authorization complete. Returning to your record…';
+      location.replace('/healow-health-data/');
+    })().catch(error => { history.replaceState({},document.title,location.pathname); message.textContent='Authorization could not be completed: ' + error.message; });
   </script>
 </body>
 </html>

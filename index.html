@@ -5,20 +5,62 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Personal Health Data Viewer</title>
   <style>
-    body { max-width: 720px; margin: 4rem auto; padding: 0 1.25rem; font: 18px/1.55 system-ui, sans-serif; color: #172033; }
-    h1 { line-height: 1.15; }
-    .notice { background: #eef6ff; border-left: 4px solid #2463a6; padding: 1rem; }
+    :root { color-scheme: light; --ink:#172033; --blue:#145d83; --pale:#eef6ff; --line:#c5d9e7; }
+    body { max-width: 760px; margin: 3rem auto; padding: 0 1.25rem; font: 17px/1.55 system-ui, sans-serif; color:var(--ink); }
+    h1 { line-height:1.15; } .card { border:1px solid var(--line); border-radius:12px; padding:1.25rem; margin:1.25rem 0; }
+    .notice { background:var(--pale); border-left:4px solid var(--blue); } button { background:var(--blue); color:#fff; border:0; border-radius:8px; padding:.75rem 1rem; font:inherit; cursor:pointer; }
+    button.secondary { background:#fff; color:var(--blue); border:1px solid var(--blue); } pre { overflow:auto; white-space:pre-wrap; word-break:break-word; background:#f5f7f8; padding:1rem; border-radius:8px; }
+    .hidden { display:none; } .muted { color:#556677; font-size:.92rem; }
   </style>
 </head>
 <body>
   <h1>Personal Health Data Viewer</h1>
-  <p>This is a personal, non-commercial project intended to let its owner securely view their own health information through read-only, standards-based FHIR APIs.</p>
-  <div class="notice">
-    <strong>Privacy:</strong> This site does not collect, sell, or share health information. Any future application will use OAuth authorization and will access only the data authorized by its owner.
+  <p>A private, read-only browser app for reviewing your own authorized Healow/eClinicalWorks health record.</p>
+  <div class="card notice"><strong>Privacy:</strong> Authorization tokens are kept only in this browser session. This site does not store, sell, or share health data.</div>
+  <div class="card" id="connect-card">
+    <h2>Connect your Healow record</h2>
+    <p>Sign in to Healow and approve read-only access for Restore Health and Wellness.</p>
+    <button id="connect">Connect Healow</button>
   </div>
-  <h2>Purpose</h2>
-  <p>The project is being developed to aggregate and review personal clinical records, including laboratory results, medications, visits, and related health information. It is not a diagnostic, treatment, emergency, or medical-device service.</p>
-  <h2>Contact</h2>
-  <p>For questions about this personal integration, contact the project owner through the associated GitHub repository.</p>
+  <div class="card hidden" id="data-card">
+    <h2>Your record</h2>
+    <button id="load">Load my patient summary</button>
+    <button id="disconnect" class="secondary">Disconnect</button>
+    <pre id="output" class="hidden"></pre>
+  </div>
+  <script>
+    const config = {
+      clientId: 'ur4XSJpgwi1CcZ0FqUp-BAMSmuM7iSpctwQtfPt3fzU',
+      redirectUri: 'https://chattanoogadan.github.io/healow-health-data/callback.html',
+      authorizeUrl: 'https://oauthserver.eclinicalworks.com/oauth/oauth2/authorize',
+      fhirBase: 'https://fhir4.healow.com/fhir/r4/HADFDD',
+      scopes: ['openid','fhirUser','patient/Patient.read','patient/AllergyIntolerance.read','patient/CarePlan.read','patient/Condition.read','patient/DiagnosticReport.read','patient/DocumentReference.read','patient/Encounter.read','patient/Immunization.read','patient/MedicationRequest.read','patient/Observation.read','patient/Procedure.read']
+    };
+    const bytes = n => crypto.getRandomValues(new Uint8Array(n));
+    const b64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    async function sha256(value) { return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))); }
+    document.getElementById('connect').onclick = async () => {
+      const verifier = b64url(bytes(64));
+      const challenge = b64url(await sha256(verifier));
+      const state = b64url(bytes(24));
+      sessionStorage.setItem('healow_pkce_verifier', verifier);
+      sessionStorage.setItem('healow_state', state);
+      const q = new URLSearchParams({response_type:'code',client_id:config.clientId,redirect_uri:config.redirectUri,scope:config.scopes.join(' '),state,aud:config.fhirBase,code_challenge:challenge,code_challenge_method:'S256'});
+      location.assign(config.authorizeUrl + '?' + q.toString());
+    };
+    function setConnected(connected) { document.getElementById('connect-card').classList.toggle('hidden',connected); document.getElementById('data-card').classList.toggle('hidden',!connected); }
+    setConnected(Boolean(sessionStorage.getItem('healow_access_token')));
+    document.getElementById('disconnect').onclick = () => { sessionStorage.removeItem('healow_access_token'); sessionStorage.removeItem('healow_patient'); setConnected(false); };
+    document.getElementById('load').onclick = async () => {
+      const output = document.getElementById('output'); output.classList.remove('hidden'); output.textContent='Loading…';
+      const token = sessionStorage.getItem('healow_access_token'); const patient = sessionStorage.getItem('healow_patient');
+      try {
+        const target = patient ? `${config.fhirBase}/Patient/${encodeURIComponent(patient)}` : `${config.fhirBase}/Patient`;
+        const response = await fetch(target,{headers:{Authorization:`Bearer ${token}`,Accept:'application/fhir+json'}});
+        const body = await response.text(); if (!response.ok) throw new Error(`FHIR request failed (${response.status}): ${body}`);
+        output.textContent = JSON.stringify(JSON.parse(body),null,2);
+      } catch (error) { output.textContent = error.message; }
+    };
+  </script>
 </body>
 </html>
