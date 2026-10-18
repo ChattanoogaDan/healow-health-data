@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import secrets
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +39,12 @@ def build_authorize_url(state, challenge):
 
 def build_search_url(resource_type, parameters):
     return f"{FHIR_BASE}/{resource_type}?{urllib.parse.urlencode(parameters)}"
+
+
+def build_laboratory_search_url(patient_id):
+    return build_search_url("Observation", {
+        "patient": patient_id, "category": "laboratory", "_count": "100", "_sort": "-date",
+    })
 
 
 def html_page():
@@ -94,11 +101,14 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/patient":
                 target = f"{FHIR_BASE}/Patient/{urllib.parse.quote(SESSION['patient'])}" if SESSION["patient"] else f"{FHIR_BASE}/Patient"
             else:
-                target = build_search_url("Observation", {"category": "laboratory", "_count": "100", "_sort": "-date"})
+                target = build_laboratory_search_url(SESSION["patient"])
             try:
                 request = urllib.request.Request(target, headers={"Authorization": f"Bearer {SESSION['access_token']}", "Accept": "application/fhir+json"})
                 with urllib.request.urlopen(request, timeout=30) as response:
                     body = response.read(); self.send_response(response.status); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                self.send_html(f"FHIR request failed: HTTP {exc.code}: {detail}", 502)
             except Exception as exc:
                 self.send_html(f"FHIR request failed: {exc}", 502)
             return

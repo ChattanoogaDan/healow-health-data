@@ -1,7 +1,7 @@
 import unittest
 from urllib.parse import parse_qs, urlparse
 
-from healow_local import FHIR_BASE, build_authorize_url, build_search_url
+from healow_local import FHIR_BASE, build_authorize_url, build_laboratory_search_url, build_search_url
 
 
 class AuthorizeUrlTests(unittest.TestCase):
@@ -28,6 +28,10 @@ class AuthorizeUrlTests(unittest.TestCase):
         parsed = urlparse(url)
         self.assertEqual(f"{parsed.scheme}://{parsed.netloc}{parsed.path}", f"{FHIR_BASE}/Observation")
         self.assertEqual(parse_qs(parsed.query), {"category": ["laboratory"], "_count": ["100"]})
+
+    def test_laboratory_search_scopes_request_to_authorized_patient(self):
+        parsed = urlparse(build_laboratory_search_url("patient-123"))
+        self.assertEqual(parse_qs(parsed.query)["patient"], ["patient-123"])
 
 
 if __name__ == "__main__":
