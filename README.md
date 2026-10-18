@@ -13,7 +13,7 @@ Open http://127.0.0.1:8765/, select **Connect Healow**, complete the Healow appr
 
 ## Moving to a new Mac
 
-The source code is stored in the private owner GitHub repository. On the new Mac:
+Follow the complete [new-Mac setup and handoff guide](docs/NEW-MAC-SETUP.md). The source code is in the public owner repository. On the new Mac:
 
 ```sh
 git clone https://github.com/ChattanoogaDan/healow-health-data.git
