@@ -31,7 +31,9 @@ class AuthorizeUrlTests(unittest.TestCase):
 
     def test_laboratory_search_scopes_request_to_authorized_patient(self):
         parsed = urlparse(build_laboratory_search_url("patient-123"))
-        self.assertEqual(parse_qs(parsed.query)["patient"], ["patient-123"])
+        self.assertEqual(parse_qs(parsed.query), {
+            "patient": ["patient-123"], "category": ["laboratory"],
+        })
 
 
 if __name__ == "__main__":

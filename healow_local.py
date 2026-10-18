@@ -43,7 +43,7 @@ def build_search_url(resource_type, parameters):
 
 def build_laboratory_search_url(patient_id):
     return build_search_url("Observation", {
-        "patient": patient_id, "category": "laboratory", "_count": "100", "_sort": "-date",
+        "patient": patient_id, "category": "laboratory",
     })
 
 
