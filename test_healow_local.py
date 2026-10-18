@@ -3,9 +3,11 @@ from urllib.parse import parse_qs, urlparse
 
 from healow_local import (
     FHIR_BASE,
+    SESSION,
     build_authorize_url,
     build_laboratory_search_url,
     build_search_url,
+    html_page,
     summarize_laboratory_bundle,
 )
 
@@ -54,6 +56,14 @@ class AuthorizeUrlTests(unittest.TestCase):
             "test": "Example analyte", "date": "2026-10-01T09:00:00Z", "value": "7.2 mg/dL",
             "reference_range": "3.0–7.0", "flag": "High",
         }])
+
+    def test_connected_page_offers_manual_sync(self):
+        original = SESSION["access_token"]
+        try:
+            SESSION["access_token"] = "test-token"
+            self.assertIn("/sync", html_page())
+        finally:
+            SESSION["access_token"] = original
 
 
 if __name__ == "__main__":

@@ -135,9 +135,10 @@ def html_page():
     patient_button = "<button onclick='loadData(\"/api/patient\")'>Load my patient summary</button>" if SESSION["access_token"] else ""
     labs_button = "<button onclick='loadData(\"/api/labs\")'>Load raw laboratory data</button>" if SESSION["access_token"] else ""
     summary_button = "<button onclick='loadData(\"/api/lab-summary\")'>Show laboratory summary</button>" if SESSION["access_token"] else ""
+    sync_button = "<a href='/sync'><button>Sync now</button></a>" if SESSION["access_token"] else ""
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>Personal Health Data Viewer</title>
 <style>body{{max-width:760px;margin:3rem auto;padding:0 1rem;font:17px/1.5 system-ui;color:#172033}}.card{{border:1px solid #c5d9e7;border-radius:12px;padding:1.25rem;margin:1rem 0}}button{{background:#145d83;color:#fff;border:0;border-radius:8px;padding:.75rem 1rem;font:inherit;cursor:pointer;margin:.25rem}}pre{{white-space:pre-wrap;word-break:break-word;background:#f5f7f8;padding:1rem;border-radius:8px}}.error{{color:#a21d2e}}</style></head>
-<body><h1>Personal Health Data Viewer</h1><div class='card'><strong>Status:</strong> {status}{error}{sync_note}<p>This local-only helper exchanges the authorization code server-side so no token request is made from GitHub Pages.</p><a href='/connect'><button>Connect Healow</button></a> {patient_button} {labs_button} {summary_button}</div><pre id='output'></pre>
+<body><h1>Personal Health Data Viewer</h1><div class='card'><strong>Status:</strong> {status}{error}{sync_note}<p>This local-only helper exchanges the authorization code server-side so no token request is made from GitHub Pages.</p><a href='/connect'><button>Connect Healow</button></a> {sync_button} {patient_button} {labs_button} {summary_button}</div><pre id='output'></pre>
 <script>async function loadData(path){{let r=await fetch(path);let t=await r.text();document.getElementById('output').textContent=t;}}</script></body></html>"""
 
 
@@ -163,6 +164,15 @@ class Handler(BaseHTTPRequestHandler):
             SESSION.update({"state": b64url(secrets.token_bytes(24)), "verifier": b64url(secrets.token_bytes(64)), "error": None})
             challenge = b64url(hashlib.sha256(SESSION["verifier"].encode()).digest())
             self.send_response(302); self.send_header("Location", build_authorize_url(SESSION["state"], challenge)); self.end_headers(); return
+        if parsed.path == "/sync":
+            if not SESSION["access_token"]:
+                return self.send_html("Not connected", 401)
+            try:
+                SESSION["sync_report"] = sync_resources()
+                SESSION["error"] = None
+            except Exception as exc:
+                SESSION["error"] = f"Sync failed: {exc}"
+            self.send_response(302); self.send_header("Location", "/"); self.end_headers(); return
         if parsed.path == "/callback":
             values = urllib.parse.parse_qs(parsed.query)
             if values.get("state", [None])[0] != SESSION["state"]:
