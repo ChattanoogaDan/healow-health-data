@@ -1,7 +1,13 @@
 import unittest
 from urllib.parse import parse_qs, urlparse
 
-from healow_local import FHIR_BASE, build_authorize_url, build_laboratory_search_url, build_search_url
+from healow_local import (
+    FHIR_BASE,
+    build_authorize_url,
+    build_laboratory_search_url,
+    build_search_url,
+    summarize_laboratory_bundle,
+)
 
 
 class AuthorizeUrlTests(unittest.TestCase):
@@ -34,6 +40,20 @@ class AuthorizeUrlTests(unittest.TestCase):
         self.assertEqual(parse_qs(parsed.query), {
             "patient": ["patient-123"], "category": ["laboratory"],
         })
+
+    def test_summarizes_a_laboratory_quantity_with_range_and_flag(self):
+        bundle = {"entry": [{"resource": {
+            "resourceType": "Observation",
+            "code": {"text": "Example analyte"},
+            "effectiveDateTime": "2026-10-01T09:00:00Z",
+            "valueQuantity": {"value": 7.2, "unit": "mg/dL"},
+            "referenceRange": [{"low": {"value": 3.0}, "high": {"value": 7.0}, "text": "3.0–7.0"}],
+            "interpretation": [{"text": "High"}],
+        }}]}
+        self.assertEqual(summarize_laboratory_bundle(bundle), [{
+            "test": "Example analyte", "date": "2026-10-01T09:00:00Z", "value": "7.2 mg/dL",
+            "reference_range": "3.0–7.0", "flag": "High",
+        }])
 
 
 if __name__ == "__main__":

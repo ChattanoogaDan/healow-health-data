@@ -47,14 +47,42 @@ def build_laboratory_search_url(patient_id):
     })
 
 
+def summarize_laboratory_bundle(bundle):
+    summary = []
+    for entry in bundle.get("entry", []):
+        observation = entry.get("resource", {})
+        if observation.get("resourceType") != "Observation":
+            continue
+        coding = observation.get("code", {})
+        test_name = coding.get("text") or next(
+            (item.get("display") or item.get("code") for item in coding.get("coding", []) if item.get("display") or item.get("code")),
+            "Unnamed test",
+        )
+        quantity = observation.get("valueQuantity")
+        if quantity:
+            value = " ".join(str(part) for part in (quantity.get("value"), quantity.get("unit")) if part is not None)
+        else:
+            value = observation.get("valueString", "")
+        ranges = observation.get("referenceRange", [])
+        reference_range = ranges[0].get("text", "") if ranges else ""
+        flags = observation.get("interpretation", [])
+        flag = flags[0].get("text") if flags else ""
+        summary.append({
+            "test": test_name, "date": observation.get("effectiveDateTime", ""), "value": value,
+            "reference_range": reference_range, "flag": flag or "",
+        })
+    return summary
+
+
 def html_page():
     status = "Connected" if SESSION["access_token"] else "Not connected"
     error = f"<p class='error'>{SESSION['error']}</p>" if SESSION["error"] else ""
     patient_button = "<button onclick='loadData(\"/api/patient\")'>Load my patient summary</button>" if SESSION["access_token"] else ""
-    labs_button = "<button onclick='loadData(\"/api/labs\")'>Load my laboratory results</button>" if SESSION["access_token"] else ""
+    labs_button = "<button onclick='loadData(\"/api/labs\")'>Load raw laboratory data</button>" if SESSION["access_token"] else ""
+    summary_button = "<button onclick='loadData(\"/api/lab-summary\")'>Show laboratory summary</button>" if SESSION["access_token"] else ""
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>Personal Health Data Viewer</title>
 <style>body{{max-width:760px;margin:3rem auto;padding:0 1rem;font:17px/1.5 system-ui;color:#172033}}.card{{border:1px solid #c5d9e7;border-radius:12px;padding:1.25rem;margin:1rem 0}}button{{background:#145d83;color:#fff;border:0;border-radius:8px;padding:.75rem 1rem;font:inherit;cursor:pointer;margin:.25rem}}pre{{white-space:pre-wrap;word-break:break-word;background:#f5f7f8;padding:1rem;border-radius:8px}}.error{{color:#a21d2e}}</style></head>
-<body><h1>Personal Health Data Viewer</h1><div class='card'><strong>Status:</strong> {status}{error}<p>This local-only helper exchanges the authorization code server-side so no token request is made from GitHub Pages.</p><a href='/connect'><button>Connect Healow</button></a> {patient_button} {labs_button}</div><pre id='output'></pre>
+<body><h1>Personal Health Data Viewer</h1><div class='card'><strong>Status:</strong> {status}{error}<p>This local-only helper exchanges the authorization code server-side so no token request is made from GitHub Pages.</p><a href='/connect'><button>Connect Healow</button></a> {patient_button} {labs_button} {summary_button}</div><pre id='output'></pre>
 <script>async function loadData(path){{let r=await fetch(path);let t=await r.text();document.getElementById('output').textContent=t;}}</script></body></html>"""
 
 
@@ -95,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     SESSION["error"] = f"Token exchange failed: {exc}"
             self.send_response(302); self.send_header("Location", "/"); self.end_headers(); return
-        if parsed.path in ("/api/patient", "/api/labs"):
+        if parsed.path in ("/api/patient", "/api/labs", "/api/lab-summary"):
             if not SESSION["access_token"]:
                 return self.send_html("Not connected", 401)
             if parsed.path == "/api/patient":
@@ -105,7 +133,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 request = urllib.request.Request(target, headers={"Authorization": f"Bearer {SESSION['access_token']}", "Accept": "application/fhir+json"})
                 with urllib.request.urlopen(request, timeout=30) as response:
-                    body = response.read(); self.send_response(response.status); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
+                    body = response.read()
+                    if parsed.path == "/api/lab-summary":
+                        body = json.dumps(summarize_laboratory_bundle(json.loads(body)), indent=2).encode()
+                    self.send_response(response.status); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
                 self.send_html(f"FHIR request failed: HTTP {exc.code}: {detail}", 502)
