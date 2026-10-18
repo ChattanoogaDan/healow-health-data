@@ -3,11 +3,18 @@
 import base64
 import hashlib
 import json
+import os
 import secrets
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from cryptography.fernet import Fernet
+from sync_store import detect_new_resources, read_cache, write_cache
 
 HOST, PORT = "127.0.0.1", 8765
 CLIENT_ID = "ur4XSJpgwi1CcZ0FqUp-BAMSmuM7iSpctwQtfPt3fzU"
@@ -21,7 +28,50 @@ SCOPES = " ".join([
     "patient/DocumentReference.read", "patient/Encounter.read", "patient/Immunization.read",
     "patient/MedicationRequest.read", "patient/Observation.read", "patient/Procedure.read",
 ])
-SESSION = {"state": None, "verifier": None, "access_token": None, "patient": None, "error": None}
+SESSION = {"state": None, "verifier": None, "access_token": None, "patient": None, "error": None, "sync_report": None}
+CACHE_PATH = Path.home() / ".healow-health-data" / "sync-cache.enc"
+KEYCHAIN_SERVICE = "healow-health-data-cache"
+
+
+def local_cache_key():
+    existing = subprocess.run(
+        ["security", "find-generic-password", "-a", "local-cache", "-s", KEYCHAIN_SERVICE, "-w"],
+        capture_output=True, text=True,
+    )
+    if existing.returncode == 0:
+        return existing.stdout.strip().encode()
+    key = Fernet.generate_key()
+    subprocess.run(
+        ["security", "add-generic-password", "-U", "-a", "local-cache", "-s", KEYCHAIN_SERVICE, "-w", key.decode()],
+        check=True, capture_output=True,
+    )
+    return key
+
+
+def fetch_fhir(target):
+    request = urllib.request.Request(target, headers={"Authorization": f"Bearer {SESSION['access_token']}", "Accept": "application/fhir+json"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read())
+
+
+def sync_resources():
+    patient_id = SESSION["patient"]
+    targets = {"Patient": f"{FHIR_BASE}/Patient/{urllib.parse.quote(patient_id)}", "Observation": build_laboratory_search_url(patient_id)}
+    for resource_type in ("AllergyIntolerance", "CarePlan", "Condition", "DiagnosticReport", "DocumentReference", "Encounter", "Immunization", "MedicationRequest", "Procedure"):
+        targets[resource_type] = build_search_url(resource_type, {"patient": patient_id})
+    resources, errors = {}, {}
+    for resource_type, target in targets.items():
+        try:
+            payload = fetch_fhir(target)
+            resources[resource_type] = [payload] if payload.get("resourceType") != "Bundle" else [item["resource"] for item in payload.get("entry", [])]
+        except Exception as exc:
+            errors[resource_type] = str(exc)
+    key = local_cache_key()
+    previous = read_cache(CACHE_PATH, key)
+    current = {"synced_at": datetime.now(timezone.utc).isoformat(), "resources": resources}
+    changes = detect_new_resources(previous, current)
+    write_cache(CACHE_PATH, key, current)
+    return {"first_sync": changes["first_sync"], "new": changes["new"], "errors": errors, "counts": {kind: len(items) for kind, items in resources.items()}}
 
 
 def b64url(raw):
@@ -77,12 +127,17 @@ def summarize_laboratory_bundle(bundle):
 def html_page():
     status = "Connected" if SESSION["access_token"] else "Not connected"
     error = f"<p class='error'>{SESSION['error']}</p>" if SESSION["error"] else ""
+    report = SESSION.get("sync_report")
+    sync_note = ""
+    if report:
+        sync_phrase = "Baseline created" if report["first_sync"] else f"{len(report['new'])} new record(s) found"
+        sync_note = f"<p><strong>Sync:</strong> {sync_phrase}. Retrieved {sum(report['counts'].values())} records; {len(report['errors'])} resource type(s) unavailable.</p>"
     patient_button = "<button onclick='loadData(\"/api/patient\")'>Load my patient summary</button>" if SESSION["access_token"] else ""
     labs_button = "<button onclick='loadData(\"/api/labs\")'>Load raw laboratory data</button>" if SESSION["access_token"] else ""
     summary_button = "<button onclick='loadData(\"/api/lab-summary\")'>Show laboratory summary</button>" if SESSION["access_token"] else ""
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>Personal Health Data Viewer</title>
 <style>body{{max-width:760px;margin:3rem auto;padding:0 1rem;font:17px/1.5 system-ui;color:#172033}}.card{{border:1px solid #c5d9e7;border-radius:12px;padding:1.25rem;margin:1rem 0}}button{{background:#145d83;color:#fff;border:0;border-radius:8px;padding:.75rem 1rem;font:inherit;cursor:pointer;margin:.25rem}}pre{{white-space:pre-wrap;word-break:break-word;background:#f5f7f8;padding:1rem;border-radius:8px}}.error{{color:#a21d2e}}</style></head>
-<body><h1>Personal Health Data Viewer</h1><div class='card'><strong>Status:</strong> {status}{error}<p>This local-only helper exchanges the authorization code server-side so no token request is made from GitHub Pages.</p><a href='/connect'><button>Connect Healow</button></a> {patient_button} {labs_button} {summary_button}</div><pre id='output'></pre>
+<body><h1>Personal Health Data Viewer</h1><div class='card'><strong>Status:</strong> {status}{error}{sync_note}<p>This local-only helper exchanges the authorization code server-side so no token request is made from GitHub Pages.</p><a href='/connect'><button>Connect Healow</button></a> {patient_button} {labs_button} {summary_button}</div><pre id='output'></pre>
 <script>async function loadData(path){{let r=await fetch(path);let t=await r.text();document.getElementById('output').textContent=t;}}</script></body></html>"""
 
 
@@ -119,6 +174,7 @@ class Handler(BaseHTTPRequestHandler):
                     payload = exchange_code(values.get("code", [""])[0])
                     SESSION["access_token"] = payload["access_token"]
                     SESSION["patient"] = payload.get("patient")
+                    SESSION["sync_report"] = sync_resources()
                     SESSION["error"] = None
                 except Exception as exc:
                     SESSION["error"] = f"Token exchange failed: {exc}"
