@@ -1,7 +1,7 @@
 import unittest
 from urllib.parse import parse_qs, urlparse
 
-from healow_local import build_authorize_url
+from healow_local import FHIR_BASE, build_authorize_url, build_search_url
 
 
 class AuthorizeUrlTests(unittest.TestCase):
@@ -22,6 +22,12 @@ class AuthorizeUrlTests(unittest.TestCase):
         with open("callback.html", encoding="utf-8") as callback:
             page = callback.read()
         self.assertIn("http://127.0.0.1:8765/callback", page)
+
+    def test_builds_laboratory_observation_search_url(self):
+        url = build_search_url("Observation", {"category": "laboratory", "_count": "100"})
+        parsed = urlparse(url)
+        self.assertEqual(f"{parsed.scheme}://{parsed.netloc}{parsed.path}", f"{FHIR_BASE}/Observation")
+        self.assertEqual(parse_qs(parsed.query), {"category": ["laboratory"], "_count": ["100"]})
 
 
 if __name__ == "__main__":
